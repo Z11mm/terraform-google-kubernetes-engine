@@ -34,7 +34,6 @@ data "google_container_cluster" "asm" {
 }
 
 resource "kubernetes_namespace" "system" {
-  count = var.create_system_namespace ? 1 : 0
 
   metadata {
     name = "istio-system"
@@ -55,17 +54,42 @@ resource "kubernetes_config_map" "asm_options" {
   depends_on = [google_gke_hub_membership.membership, google_gke_hub_feature.mesh, var.module_depends_on]
 }
 
-module "cpr" {
-  source  = "terraform-google-modules/gcloud/google//modules/kubectl-wrapper"
-  version = "~> 3.1"
+# module "cpr" {
+#   source  = "terraform-google-modules/gcloud/google//modules/kubectl-wrapper"
+#   version = "~> 3.1"
 
-  project_id       = var.project_id
-  cluster_name     = var.cluster_name
-  cluster_location = var.cluster_location
-  internal_ip      = var.internal_ip
+#   project_id       = var.project_id
+#   cluster_name     = var.cluster_name
+#   cluster_location = var.cluster_location
+#   internal_ip      = var.internal_ip
 
-  kubectl_create_command  = "${path.module}/scripts/create_cpr.sh ${local.revision_name} ${local.channel} ${var.enable_cni} ${var.enable_vpc_sc}"
-  kubectl_destroy_command = "${path.module}/scripts/destroy_cpr.sh ${local.revision_name}"
+#   kubectl_create_command  = "${path.module}/scripts/create_cpr.sh ${local.revision_name} ${local.channel} ${var.enable_cni} ${var.enable_vpc_sc}"
+#   kubectl_destroy_command = "${path.module}/scripts/destroy_cpr.sh ${local.revision_name}"
 
-  module_depends_on = [kubernetes_config_map.asm_options]
+#   module_depends_on = [kubernetes_config_map.asm_options]
+# }
+
+resource "kubernetes_manifest" "cpr" {
+  depends_on = [
+    kubernetes_config_map.asm_options,
+  ]
+  manifest = {
+    apiVersion = "mesh.cloud.google.com/v1beta1"
+    kind = "ControlPlaneRevision"
+    metadata = {
+      name = local.revision_name
+      namespace = kubernetes_namespace.system.metadata.0.name
+      annotations = {
+        "mesh.cloud.google.com/vpcsc" = var.enable_vpc_sc
+      }
+      labels = {
+        "mesh.cloud.google.com/managed-cni-enabled" = var.enable_cni
+        "app.kubernetes.io/created-by" = "terraform-module"
+      }
+    }
+  }
+  spec = {
+    type = "managed_service"
+    channel = local.channel
+  }
 }
